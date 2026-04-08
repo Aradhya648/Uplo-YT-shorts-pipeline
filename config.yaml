@@ -6,7 +6,7 @@ pipeline:
   scenes_per_video: 4             # number of scenes
 
 script:
-  model: "openrouter/stepfun/step-3.5-flash:free"
+  model: "stepfun/step-3.5-flash:free"
   max_tokens: 800
   tone: "engaging, curious, slightly dramatic"
 
