@@ -100,9 +100,9 @@ def generate_script(topic: dict, output_dir: Path, max_retries: int = 2) -> dict
     )
 
     models = [
-        "stepfun/step-3.5-flash:free",
         "google/gemma-4-31b-it:free",
-        "nvidia/nemotron-3-super-120b-a12b:free",
+        "minimax/minimax-m2.5:free",
+        "google/gemma-4-26b-a4b-it:free",
     ]
 
     messages = [
