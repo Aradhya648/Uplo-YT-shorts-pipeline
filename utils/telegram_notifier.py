@@ -1,0 +1,1 @@
+"""DRUT Telegram notification utility."""

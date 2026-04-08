@@ -1,0 +1,14 @@
+output/
+.env
+__pycache__/
+*.pyc
+*.wav
+*.mp4
+*.mp3
+*.srt
+.venv/
+*.egg-info/
+dist/
+build/
+assets/piper-models/*.onnx
+assets/piper-models/*.onnx.json

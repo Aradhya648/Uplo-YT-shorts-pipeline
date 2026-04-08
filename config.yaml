@@ -1,0 +1,34 @@
+pipeline:
+  niche: "historical facts micro-history"
+  video_duration_target: 55       # seconds
+  video_resolution: "1080x1920"   # 9:16 vertical
+  fps: 30
+  scenes_per_video: 4             # number of scenes
+
+script:
+  model: "openrouter/stepfun/step-3.5-flash:free"
+  max_tokens: 800
+  tone: "engaging, curious, slightly dramatic"
+
+assets:
+  pexels_per_scene: 2             # fetch 2 clips per scene, use best
+  pollinations_per_scene: 1       # 1 AI image per scene as fallback
+  google_ai_video_scenes: [0, 3]  # use AI video for first and last scene only
+
+captions:
+  font: "Arial Bold"
+  font_size: 52
+  color: "white"
+  outline_color: "black"
+  outline_width: 3
+  position: "bottom_center"
+
+upload:
+  privacy: "public"
+  category_id: "27"               # Education
+  tags: ["history", "historyfacts", "didyouknow", "shorts", "microhistory"]
+  title_template: "{hook} #Shorts"
+  description_template: |
+    {summary}
+
+    #history #historyfacts #shorts #didyouknow #{topic_tag}
