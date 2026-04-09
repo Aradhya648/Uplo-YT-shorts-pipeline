@@ -18,6 +18,77 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GOOGLE_AI_API_KEY = os.getenv("GOOGLE_AI_STUDIO_API_KEY")
+
+GEMINI_MODELS = [
+    "models/gemini-2.0-flash",
+    "models/gemini-2.0-flash-lite",
+    "models/gemini-2.5-flash-lite",
+]
+
+OPENROUTER_MODELS = [
+    "google/gemma-4-31b-it:free",
+    "minimax/minimax-m2.5:free",
+    "google/gemma-4-26b-a4b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "openai/gpt-oss-120b:free",
+    "google/gemma-3-27b-it:free",
+    "qwen/qwen3-coder:free",
+]
+
+
+def _call_gemini(system_prompt: str, user_prompt: str) -> str | None:
+    """Try Gemini API models in sequence. Returns text content or None."""
+    if not GOOGLE_AI_API_KEY:
+        return None
+    combined = system_prompt + "\n\n" + user_prompt
+    for model in GEMINI_MODELS:
+        try:
+            payload = json.dumps({
+                "contents": [{"role": "user", "parts": [{"text": combined}]}],
+                "generationConfig": {"maxOutputTokens": 1000, "temperature": 0.8},
+            })
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={GOOGLE_AI_API_KEY}"
+            req = urllib.request.Request(url, data=payload.encode(), headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode())
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            print(f"[ScriptGen] Using Gemini model: {model}")
+            return text
+        except Exception as e:
+            print(f"[ScriptGen] Gemini {model} failed: {e}")
+            continue
+    return None
+
+
+def _call_openrouter(messages: list, max_tokens: int = 800) -> str | None:
+    """Try OpenRouter free models in sequence. Returns text content or None."""
+    for model in OPENROUTER_MODELS:
+        try:
+            payload = json.dumps({
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": 0.8,
+            })
+            req = urllib.request.Request(
+                "https://openrouter.ai/api/v1/chat/completions",
+                data=payload.encode(),
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode())
+            text = data["choices"][0]["message"]["content"].strip()
+            print(f"[ScriptGen] Using OpenRouter model: {model}")
+            return text
+        except Exception as e:
+            print(f"[ScriptGen] OpenRouter {model} failed: {e}")
+            continue
+    return None
 
 SYSTEM_PROMPT = """You are an elite YouTube Shorts scriptwriter for a channel called HistoryShorts.
 Your niche: RARE, CREEPY, and OBSCURE historical facts that most people have NEVER heard of.
@@ -99,50 +170,20 @@ def generate_script(topic: dict, output_dir: Path, max_retries: int = 2) -> dict
         topic_summary=topic_summary,
     )
 
-    models = [
-        "google/gemma-4-31b-it:free",
-        "minimax/minimax-m2.5:free",
-        "google/gemma-4-26b-a4b-it:free",
-    ]
-
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
     ]
 
     for attempt in range(max_retries + 1):
-        # Try each model in fallback chain
-        data = None
-        for model in models:
-            try:
-                payload = json.dumps({
-                    "model": model,
-                    "messages": messages,
-                    "max_tokens": 800,
-                    "temperature": 0.8,
-                })
-                req = urllib.request.Request(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    data=payload.encode(),
-                    headers={
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    data = json.loads(resp.read().decode())
-                print(f"[ScriptGen] Using model: {model}")
-                break
-            except Exception as e:
-                print(f"[ScriptGen] Model {model} failed: {e}")
-                continue
-
-        if not data:
+        # Try Gemini first (higher free tier limits), then OpenRouter
+        content = _call_gemini(SYSTEM_PROMPT, prompt)
+        if not content:
+            content = _call_openrouter(messages)
+        if not content:
             raise RuntimeError("All AI models failed")
 
         try:
-
-            content = data["choices"][0]["message"]["content"].strip()
 
             # Extract JSON from response
             json_match = re.search(r'\{[\s\S]*\}', content)

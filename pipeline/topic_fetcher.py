@@ -25,6 +25,36 @@ load_dotenv()
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GOOGLE_AI_API_KEY = os.getenv("GOOGLE_AI_STUDIO_API_KEY")
+
+GEMINI_MODELS = [
+    "models/gemini-2.0-flash",
+    "models/gemini-2.0-flash-lite",
+    "models/gemini-2.5-flash-lite",
+]
+
+
+def _call_gemini_raw(prompt: str) -> str | None:
+    """Call Gemini API. Returns raw text or None."""
+    if not GOOGLE_AI_API_KEY:
+        return None
+    for model in GEMINI_MODELS:
+        try:
+            payload = json.dumps({
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 600, "temperature": 0.7},
+            })
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={GOOGLE_AI_API_KEY}"
+            req = urllib.request.Request(url, data=payload.encode(), headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = json.loads(resp.read().decode())
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            print(f"[TopicFetcher] AI scoring succeeded with Gemini: {model}")
+            return text
+        except Exception as e:
+            print(f"[TopicFetcher] Gemini {model} failed: {e}")
+            continue
+    return None
 
 # Niche-specific search queries for Reddit via Tavily
 REDDIT_QUERIES = [
@@ -153,6 +183,38 @@ def fetch_web_via_tavily(client: TavilyClient) -> list[dict]:
     return candidates
 
 
+CREEPY_KEYWORDS = [
+    "murder", "death", "dead", "killed", "execution", "torture", "buried", "corpse",
+    "ghost", "haunted", "curse", "cursed", "ritual", "cult", "disease", "plague",
+    "disappeared", "vanished", "mystery", "unsolved", "strange", "bizarre", "eerie",
+    "dark", "secret", "forbidden", "hidden", "forgotten", "lost", "discovered",
+    "experiment", "asylum", "witch", "demon", "possessed", "sacrifice",
+]
+GENERIC_KEYWORDS = [
+    "world war", "hitler", "napoleon", "columbus", "washington", "lincoln",
+    "revolution", "invention", "famous", "popular", "well-known", "celebrated",
+]
+
+
+def _keyword_score_and_pick(candidates: list[dict]) -> dict:
+    """Fallback: score candidates by keyword matching when AI is unavailable."""
+    def score(c: dict) -> float:
+        text = (c.get("title", "") + " " + c.get("content", "")).lower()
+        creep = sum(1 for kw in CREEPY_KEYWORDS if kw in text)
+        generic = sum(1 for kw in GENERIC_KEYWORDS if kw in text)
+        return creep - (generic * 2)
+
+    best = max(candidates, key=score)
+    return {
+        "topic_title": best["title"],
+        "topic_summary": best["content"],
+        "scores": {},
+        "source": best["source"],
+        "source_url": best.get("url", ""),
+        "rejection_reason": "AI unavailable, keyword-scored",
+    }
+
+
 def score_and_pick_best(candidates: list[dict]) -> dict:
     """Use OpenRouter AI to score candidates and pick the best one for a YouTube Short."""
     if not candidates:
@@ -194,42 +256,49 @@ IMPORTANT: You MUST respond with ONLY a JSON object. No analysis, no thinking, n
   "rejection_reason_for_others": "<why the other top candidates lost>"
 }}"""
 
-    models = [
+    openrouter_models = [
         "google/gemma-4-31b-it:free",
         "minimax/minimax-m2.5:free",
         "google/gemma-4-26b-a4b-it:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "nousresearch/hermes-3-llama-3.1-405b:free",
+        "openai/gpt-oss-120b:free",
+        "google/gemma-3-27b-it:free",
+        "qwen/qwen3-coder:free",
     ]
 
-    payload_template = {
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 500,
-        "temperature": 0.7,
-    }
-
-    # Try each model in fallback chain
-    content = None
-    for model in models:
-        try:
-            payload = json.dumps({**payload_template, "model": model})
-            req = urllib.request.Request(
-                "https://openrouter.ai/api/v1/chat/completions",
-                data=payload.encode(),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode())
-            content = data["choices"][0]["message"]["content"].strip()
-            print(f"[TopicFetcher] AI scoring succeeded with model: {model}")
-            break
-        except Exception as e:
-            print(f"[TopicFetcher] Model {model} failed: {e}")
-            continue
+    # Try Gemini first (higher free-tier limits), then OpenRouter
+    content = _call_gemini_raw(prompt)
 
     if not content:
-        raise ValueError("All AI models failed for scoring")
+        for model in openrouter_models:
+            try:
+                payload = json.dumps({
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 500,
+                    "temperature": 0.7,
+                })
+                req = urllib.request.Request(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    data=payload.encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    data = json.loads(resp.read().decode())
+                content = data["choices"][0]["message"]["content"].strip()
+                print(f"[TopicFetcher] AI scoring succeeded with OpenRouter: {model}")
+                break
+            except Exception as e:
+                print(f"[TopicFetcher] OpenRouter {model} failed: {e}")
+                continue
+
+    if not content:
+        print("[TopicFetcher] All AI models rate-limited. Using keyword-based fallback scorer.")
+        return _keyword_score_and_pick(candidates)
 
     try:
         # Try to extract JSON from the response
