@@ -1,7 +1,9 @@
 """HistoryShorts — Automated YouTube Shorts Pipeline"""
 
 import argparse
+import shutil
 import sys
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -22,12 +24,31 @@ def log(msg: str):
     print(f"[HistoryShorts] {msg}", flush=True)
 
 
+def cleanup_old_outputs(max_age_days: int = 3):
+    """Delete output run folders older than max_age_days to prevent disk bloat."""
+    cutoff = time.time() - (max_age_days * 86400)
+    deleted = 0
+    for run_dir in OUTPUT_DIR.iterdir():
+        if run_dir.is_dir() and run_dir.stat().st_mtime < cutoff:
+            try:
+                shutil.rmtree(run_dir)
+                deleted += 1
+            except Exception:
+                pass
+    if deleted:
+        log(f"Cleaned up {deleted} old output folder(s)")
+
+
 def main():
     parser = argparse.ArgumentParser(description="HistoryShorts pipeline")
     parser.add_argument("--dry-run", action="store_true", help="Generate assets but skip upload")
     parser.add_argument("--topic", type=str, default=None, help="Override topic (title|hook|description)")
     parser.add_argument("--count", type=int, default=1, help="Number of Shorts to produce (default 1)")
     args = parser.parse_args()
+
+    # Clean up old outputs before starting
+    if OUTPUT_DIR.exists():
+        cleanup_old_outputs()
 
     for i in range(args.count):
         if args.count > 1:
