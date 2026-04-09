@@ -1,69 +1,114 @@
 """
-Voiceover Generator — Converts script narrations to audio using Piper TTS.
+Voiceover Generator — Converts script narrations to audio using Edge TTS.
 
-Concatenates all scene narrations into a single text, generates WAV via Piper,
-and saves to output/{run_id}/voiceover.wav.
+Microsoft Edge TTS provides near-human neural voices for free.
+Uses en-US-GuyNeural with slightly slower rate for dramatic effect.
 """
 
+import asyncio
 import json
 import os
 import subprocess
 from pathlib import Path
 
+import edge_tts
 from dotenv import load_dotenv
 
 load_dotenv()
 
-PIPER_MODEL_PATH = Path(os.getenv("PIPER_MODEL_PATH", "assets/piper-models/en_US-lessac-medium.onnx"))
-PIPER_SPEED = float(os.getenv("PIPER_SPEED", "1.0"))
+# Voice config — GuyNeural is deep, dramatic, perfect for dark history
+VOICE = os.getenv("TTS_VOICE", "en-US-GuyNeural")
+RATE = os.getenv("TTS_RATE", "-5%")   # slightly slower = more dramatic
+PITCH = os.getenv("TTS_PITCH", "-2Hz")  # slightly deeper
+
+FFMPEG_DIR = None
+for p in [
+    Path("C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin"),
+]:
+    if p.exists():
+        FFMPEG_DIR = p
+        break
+
+
+def _get_ffmpeg() -> str:
+    return str(FFMPEG_DIR / "ffmpeg.exe") if FFMPEG_DIR else "ffmpeg"
+
+
+async def _generate_scene_audio(text: str, output_path: Path) -> Path:
+    """Generate audio for a single scene narration."""
+    communicate = edge_tts.Communicate(text, voice=VOICE, rate=RATE, pitch=PITCH)
+    await communicate.save(str(output_path))
+    return output_path
+
+
+async def _generate_all_scenes(scenes: list[dict], work_dir: Path) -> list[Path]:
+    """Generate audio for all scenes with pauses between them."""
+    scene_files = []
+    for scene in scenes:
+        scene_num = scene["scene_number"]
+        narration = scene["narration"]
+        out = work_dir / f"scene_{scene_num}.mp3"
+        print(f"[Voiceover] Scene {scene_num}: {len(narration.split())} words")
+        await _generate_scene_audio(narration, out)
+        scene_files.append(out)
+    return scene_files
 
 
 def generate_voiceover(script: dict, output_dir: Path) -> Path:
-    """Generate voiceover WAV from script narrations using Piper TTS."""
+    """Generate voiceover WAV from script narrations using Edge TTS."""
     output_dir.mkdir(parents=True, exist_ok=True)
+    work_dir = output_dir / "vo_work"
+    work_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "voiceover.wav"
 
-    # Concatenate all scene narrations with pauses between scenes
-    narrations = []
-    for scene in script["scenes"]:
-        narrations.append(scene["narration"])
+    scenes = script["scenes"]
+    total_words = sum(len(s["narration"].split()) for s in scenes)
+    print(f"[Voiceover] Voice: {VOICE}, Rate: {RATE}, Pitch: {PITCH}")
+    print(f"[Voiceover] Total: {total_words} words across {len(scenes)} scenes")
 
-    full_text = " ... ".join(narrations)
-    print(f"[Voiceover] Text length: {len(full_text.split())} words")
-    print(f"[Voiceover] Model: {PIPER_MODEL_PATH}")
+    # Generate per-scene audio
+    scene_files = asyncio.run(_generate_all_scenes(scenes, work_dir))
 
-    # Resolve model path relative to project root
-    model_path = PIPER_MODEL_PATH
-    if not model_path.is_absolute():
-        model_path = Path.cwd() / model_path
+    # Generate a 0.5s silence file for pauses between scenes
+    silence_path = work_dir / "silence.mp3"
+    ffmpeg = _get_ffmpeg()
+    subprocess.run([
+        ffmpeg, "-y", "-f", "lavfi", "-i",
+        "anullsrc=r=24000:cl=mono", "-t", "0.5",
+        "-c:a", "libmp3lame", str(silence_path),
+    ], capture_output=True, timeout=10)
 
-    if not model_path.exists():
-        raise FileNotFoundError(f"Piper model not found: {model_path}")
+    # Build concat list: scene1 + silence + scene2 + silence + ...
+    concat_list = work_dir / "concat.txt"
+    with open(concat_list, "w") as f:
+        for i, sf in enumerate(scene_files):
+            f.write(f"file '{sf.resolve().as_posix()}'\n")
+            if i < len(scene_files) - 1:
+                f.write(f"file '{silence_path.resolve().as_posix()}'\n")
 
-    # Build Piper command
-    cmd = [
-        "python", "-m", "piper",
-        "--model", str(model_path),
-        "--output_file", str(output_path),
-        "--length-scale", str(1.0 / PIPER_SPEED),
-        "--sentence-silence", "0.4",
-    ]
-
-    # Pipe text to Piper via stdin
-    print(f"[Voiceover] Generating audio...")
-    result = subprocess.run(
-        cmd,
-        input=full_text,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    # Concatenate all scenes with pauses into final WAV
+    print(f"[Voiceover] Concatenating {len(scene_files)} scenes with pauses...")
+    concat_output = work_dir / "combined.mp3"
+    result = subprocess.run([
+        ffmpeg, "-y", "-f", "concat", "-safe", "0",
+        "-i", str(concat_list),
+        "-c", "copy", str(concat_output),
+    ], capture_output=True, text=True, timeout=60)
 
     if result.returncode != 0:
-        raise RuntimeError(f"Piper TTS failed: {result.stderr}")
+        raise RuntimeError(f"FFmpeg concat failed: {result.stderr[:200]}")
 
-    if not output_path.exists():
-        raise FileNotFoundError(f"Voiceover not generated: {output_path}")
+    # Convert to WAV for compatibility with faster-whisper
+    subprocess.run([
+        ffmpeg, "-y", "-i", str(concat_output),
+        "-ar", "16000", "-ac", "1",
+        str(output_path),
+    ], capture_output=True, text=True, timeout=60)
+
+    # Cleanup work dir
+    for f in work_dir.iterdir():
+        f.unlink(missing_ok=True)
+    work_dir.rmdir()
 
     file_size = output_path.stat().st_size
     print(f"[Voiceover] Saved: {output_path} ({file_size / 1024:.1f} KB)")
@@ -72,22 +117,12 @@ def generate_voiceover(script: dict, output_dir: Path) -> Path:
 
 
 if __name__ == "__main__":
-    # Standalone test: load script.json from test output and generate voiceover
-    test_script_path = Path("output/test_script/script.json")
+    test_script_path = Path("output/test_gemma/script.json")
     if not test_script_path.exists():
-        print("No test script found. Run script_generator.py first.")
-        print("Generating with sample script...")
-        script = {
-            "scenes": [
-                {"scene_number": 1, "narration": "In 1518, a woman stepped into the streets of Strasbourg and began to dance. She couldn't stop.", "duration_seconds": 12},
-                {"scene_number": 2, "narration": "Within a week, thirty-four others had joined her. Their feet bled. Their bodies collapsed. But still, they danced.", "duration_seconds": 13},
-                {"scene_number": 3, "narration": "The city's physicians were baffled. They prescribed more dancing, building a stage and hiring musicians. It only made things worse.", "duration_seconds": 13},
-                {"scene_number": 4, "narration": "By September, hundreds had been afflicted. Some danced themselves to death. To this day, no one knows why.", "duration_seconds": 12},
-            ]
-        }
-    else:
-        script = json.loads(test_script_path.read_text())
+        print("No test script found.")
+        raise SystemExit(1)
 
-    output_dir = Path("output/test_voiceover")
+    script = json.loads(test_script_path.read_text())
+    output_dir = Path("output/test_quality")
     wav_path = generate_voiceover(script, output_dir)
     print(f"\nVoiceover saved to: {wav_path}")

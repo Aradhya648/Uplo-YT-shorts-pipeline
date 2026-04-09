@@ -1,22 +1,20 @@
 """
-Video Assembler — Combines all assets into a final 9:16 YouTube Short.
+Video Assembler — World-class YouTube Shorts assembly.
 
-Process:
-1. Load scene assets (videos or images)
-2. Crop/resize to 1080x1920
-3. For images: apply Ken Burns zoom effect via FFmpeg
-4. Trim/extend clips to match scene duration
-5. Concatenate all scenes
-6. Overlay voiceover audio
-7. Burn captions from SRT via FFmpeg
-8. Export final MP4
+Features:
+- Crop/resize all assets to 1080x1920
+- Ken Burns zoom for static images
+- Crossfade transitions between scenes
+- Dark/moody color grading for creepy content
+- Hook text overlay on first 3 seconds
+- Punchy 3-word ALL CAPS captions (small, bottom-center)
+- Voiceover audio overlay
 """
 
 import json
 import subprocess
 from pathlib import Path
 
-from moviepy import VideoFileClip, AudioFileClip, ImageClip, concatenate_videoclips
 import yaml
 from dotenv import load_dotenv
 
@@ -50,48 +48,70 @@ def _get_ffprobe() -> str:
     return str(FFMPEG_DIR / "ffprobe.exe") if FFMPEG_DIR else "ffprobe"
 
 
-def _crop_resize_video(input_path: Path, output_path: Path, duration: float) -> bool:
-    """Use FFmpeg to crop, resize, and trim a video to 1080x1920."""
-    ffmpeg = _get_ffmpeg()
+def _probe_duration(path: Path) -> float:
+    try:
+        result = subprocess.run(
+            [_get_ffprobe(), "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
+            capture_output=True, text=True, timeout=15,
+        )
+        return float(json.loads(result.stdout)["format"]["duration"])
+    except Exception:
+        return 0
 
-    # FFmpeg filter: crop to 9:16 center, scale to 1080x1920, trim to duration
-    # crop=w:h:x:y — if wider than 9:16, crop width; if taller, crop height
-    vf = (
-        "scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,"
-        "setsar=1"
+
+def _prepare_video_clip(input_path: Path, output_path: Path, duration: float) -> bool:
+    """Crop, resize, loop if needed, apply color grading, trim to duration."""
+    ffmpeg = _get_ffmpeg()
+    clip_dur = _probe_duration(input_path)
+
+    # Color grading filter: darken, increase contrast, slight desaturation for moody look
+    color_grade = (
+        "eq=brightness=-0.06:contrast=1.2:saturation=0.85,"
+        "curves=m='0/0 0.25/0.15 0.5/0.45 0.75/0.7 1/0.9'"
     )
+
+    vf = (
+        f"scale=1080:1920:force_original_aspect_ratio=increase,"
+        f"crop=1080:1920,"
+        f"setsar=1,"
+        f"{color_grade}"
+    )
+
+    # If clip is shorter than needed, use stream_loop
+    loop_args = []
+    if clip_dur > 0 and clip_dur < duration - 0.5:
+        loop_args = ["-stream_loop", "-1"]
 
     cmd = [
         ffmpeg, "-y",
+        *loop_args,
         "-i", str(input_path),
         "-t", str(duration),
         "-vf", vf,
         "-r", str(TARGET_FPS),
         "-c:v", "libx264", "-preset", "fast",
-        "-an",  # no audio from scene clips
-        "-pix_fmt", "yuv420p",
+        "-an", "-pix_fmt", "yuv420p",
         str(output_path),
     ]
-
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        print(f"[Assembly] FFmpeg crop/resize failed: {result.stderr[:300]}")
-        return False
-    return True
+    return result.returncode == 0
 
 
-def _image_to_kenburns_video(input_path: Path, output_path: Path, duration: float) -> bool:
-    """Use FFmpeg to create a Ken Burns zoom video from a static image."""
+def _prepare_image_clip(input_path: Path, output_path: Path, duration: float) -> bool:
+    """Ken Burns zoom + color grading on a static image."""
     ffmpeg = _get_ffmpeg()
-
-    # Ken Burns: slow zoom from 100% to 130% over duration, centered
-    # zoompan filter: z='1+0.3*on/({duration}*{fps})' means zoom from 1.0 to 1.3
     total_frames = int(duration * TARGET_FPS)
+
+    color_grade = (
+        "eq=brightness=-0.06:contrast=1.2:saturation=0.85,"
+        "curves=m='0/0 0.25/0.15 0.5/0.45 0.75/0.7 1/0.9'"
+    )
+
     vf = (
         f"zoompan=z='1+0.3*on/{total_frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         f":d={total_frames}:s=1080x1920:fps={TARGET_FPS},"
-        f"setsar=1"
+        f"setsar=1,"
+        f"{color_grade}"
     )
 
     cmd = [
@@ -100,27 +120,6 @@ def _image_to_kenburns_video(input_path: Path, output_path: Path, duration: floa
         "-vf", vf,
         "-t", str(duration),
         "-c:v", "libx264", "-preset", "fast",
-        "-pix_fmt", "yuv420p",
-        str(output_path),
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        print(f"[Assembly] FFmpeg Ken Burns failed: {result.stderr[:300]}")
-        return False
-    return True
-
-
-def _loop_video(input_path: Path, output_path: Path, duration: float) -> bool:
-    """Loop a short video to reach the target duration."""
-    ffmpeg = _get_ffmpeg()
-    cmd = [
-        ffmpeg, "-y",
-        "-stream_loop", "-1",
-        "-i", str(input_path),
-        "-t", str(duration),
-        "-c:v", "libx264", "-preset", "fast",
-        "-an",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
@@ -128,76 +127,99 @@ def _loop_video(input_path: Path, output_path: Path, duration: float) -> bool:
     return result.returncode == 0
 
 
-def prepare_scene_clip(asset_info: dict, scenes_dir: Path, duration: float, work_dir: Path) -> Path | None:
-    """Prepare a single scene clip: crop, resize, trim/loop to exact duration."""
-    if not asset_info.get("path"):
-        return None
+def _add_crossfade(clips: list[Path], output_path: Path, fade_duration: float = 0.5) -> bool:
+    """Concatenate clips with crossfade transitions."""
+    ffmpeg = _get_ffmpeg()
 
-    asset_path = scenes_dir / Path(asset_info["path"]).name
-    if not asset_path.exists():
-        # Try the full path
-        asset_path = Path(asset_info["path"])
-    if not asset_path.exists():
-        print(f"[Assembly] Asset not found: {asset_info['path']}")
-        return None
+    if len(clips) == 1:
+        import shutil
+        shutil.copy2(clips[0], output_path)
+        return True
 
-    scene_num = asset_info["scene_number"]
-    work_dir.mkdir(parents=True, exist_ok=True)
+    # Build complex filter for xfade between each pair
+    inputs = []
+    for c in clips:
+        inputs.extend(["-i", str(c)])
 
-    is_image = asset_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']
+    # Get durations for offset calculation
+    durations = [_probe_duration(c) for c in clips]
 
-    if is_image:
-        # Ken Burns effect for images
-        output = work_dir / f"scene_{scene_num}_ready.mp4"
-        print(f"[Assembly] Scene {scene_num}: Ken Burns from image {asset_path.name}")
-        if _image_to_kenburns_video(asset_path, output, duration):
-            return output
-        return None
+    # Build xfade filter chain
+    filter_parts = []
+    current_label = "[0:v]"
+    offset = durations[0] - fade_duration
 
-    # Video clip — crop/resize
-    cropped = work_dir / f"scene_{scene_num}_cropped.mp4"
-    print(f"[Assembly] Scene {scene_num}: Crop/resize video {asset_path.name}")
+    for i in range(1, len(clips)):
+        next_label = f"[v{i}]" if i < len(clips) - 1 else "[vout]"
+        filter_parts.append(
+            f"{current_label}[{i}:v]xfade=transition=fade:duration={fade_duration}:offset={offset:.2f}{next_label}"
+        )
+        current_label = next_label
+        if i < len(clips) - 1:
+            offset += durations[i] - fade_duration
 
-    # Get video duration
-    probe_cmd = [
-        _get_ffprobe(),
-        "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "json",
-        str(asset_path),
+    filter_str = ";".join(filter_parts)
+
+    cmd = [
+        ffmpeg, "-y",
+        *inputs,
+        "-filter_complex", filter_str,
+        "-map", "[vout]",
+        "-c:v", "libx264", "-preset", "fast",
+        "-pix_fmt", "yuv420p",
+        str(output_path),
     ]
-    try:
-        probe = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
-        clip_duration = float(json.loads(probe.stdout)["format"]["duration"])
-    except Exception:
-        clip_duration = duration  # assume it's long enough
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if result.returncode != 0:
+        print(f"[Assembly] Crossfade failed, falling back to hard cuts: {result.stderr[:200]}")
+        # Fallback: simple concat without crossfade
+        concat_list = output_path.parent / "concat_fallback.txt"
+        with open(concat_list, "w") as f:
+            for c in clips:
+                f.write(f"file '{c.resolve().as_posix()}'\n")
+        result = subprocess.run([
+            ffmpeg, "-y", "-f", "concat", "-safe", "0",
+            "-i", str(concat_list), "-c:v", "libx264", "-preset", "fast",
+            "-pix_fmt", "yuv420p", str(output_path),
+        ], capture_output=True, text=True, timeout=120)
+        concat_list.unlink(missing_ok=True)
+        return result.returncode == 0
 
-    print(f"[Assembly] Scene {scene_num}: source={asset_path.name} ({clip_duration:.1f}s), need={duration}s")
+    return True
 
-    # Crop and resize, pass the full clip
-    if not _crop_resize_video(asset_path, cropped, clip_duration):
-        return None
 
-    # If clip is shorter than needed, loop it
-    if clip_duration < duration - 0.5:
-        looped = work_dir / f"scene_{scene_num}_looped.mp4"
-        if _loop_video(cropped, looped, duration):
-            cropped.unlink(missing_ok=True)
-            # Final trim
-            ready = work_dir / f"scene_{scene_num}_ready.mp4"
-            trim_cmd = [_get_ffmpeg(), "-y", "-i", str(looped), "-t", str(duration), "-c", "copy", str(ready)]
-            subprocess.run(trim_cmd, capture_output=True, text=True, timeout=30)
-            looped.unlink(missing_ok=True)
-            return ready if ready.exists() else None
-    else:
-        # Trim to exact duration
-        ready = work_dir / f"scene_{scene_num}_ready.mp4"
-        trim_cmd = [_get_ffmpeg(), "-y", "-i", str(cropped), "-t", str(duration), "-c", "copy", str(ready)]
-        subprocess.run(trim_cmd, capture_output=True, text=True, timeout=30)
-        cropped.unlink(missing_ok=True)
-        return ready if ready.exists() else None
+def _add_hook_overlay(input_path: Path, output_path: Path, hook_text: str) -> bool:
+    """Burn hook text on the first 3 seconds as a dramatic overlay."""
+    ffmpeg = _get_ffmpeg()
 
-    return None
+    # Escape special characters for FFmpeg drawtext
+    safe_text = hook_text.upper().replace("'", "\\'").replace(":", "\\:").replace(",", "\\,")
+
+    font_path = "C\\:/Windows/Fonts/arialbd.ttf"
+
+    # Hook text: large, white, center screen, fades in and out
+    drawtext = (
+        f"drawtext=text='{safe_text}':"
+        f"fontfile='{font_path}':"
+        f"fontsize=56:fontcolor=white:borderw=4:bordercolor=black:"
+        f"x=(w-text_w)/2:y=(h-text_h)/2-100:"
+        f"enable='between(t\\,0.3\\,3)':"
+        f"alpha='if(lt(t\\,0.8)\\,((t-0.3)/0.5)\\,if(gt(t\\,2.5)\\,(3-t)/0.5\\,1))'"
+    )
+
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(input_path),
+        "-vf", drawtext,
+        "-c:v", "libx264", "-preset", "fast",
+        "-c:a", "copy",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        print(f"[Assembly] Hook overlay failed: {result.stderr[:200]}")
+        return False
+    return True
 
 
 def assemble_video(
@@ -212,104 +234,112 @@ def assemble_video(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     work_dir = output_path.parent / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
+    ffmpeg = _get_ffmpeg()
 
-    print(f"\n[Assembly] === VIDEO ASSEMBLY ===")
+    print(f"\n[Assembly] === VIDEO ASSEMBLY (Quality Mode) ===")
     print(f"[Assembly] Target: {TARGET_WIDTH}x{TARGET_HEIGHT} @ {TARGET_FPS}fps")
 
-    # Step 1: Prepare all scene clips
-    scene_paths = []
+    # Step 1: Prepare all scene clips (crop, resize, color grade)
+    scene_clips = []
     for scene in script["scenes"]:
         scene_num = scene["scene_number"]
         duration = scene["duration_seconds"]
 
         asset = next((a for a in assets_manifest if a["scene_number"] == scene_num), None)
-        if not asset:
-            print(f"[Assembly] Scene {scene_num}: No asset in manifest")
+        if not asset or not asset.get("path"):
+            print(f"[Assembly] Scene {scene_num}: No asset, skipping")
             continue
 
-        clip_path = prepare_scene_clip(asset, scenes_dir, duration, work_dir)
-        if clip_path:
-            scene_paths.append(clip_path)
-        else:
-            print(f"[Assembly] Scene {scene_num}: Failed to prepare clip")
+        asset_path = scenes_dir / Path(asset["path"]).name
+        if not asset_path.exists():
+            asset_path = Path(asset["path"])
+        if not asset_path.exists():
+            print(f"[Assembly] Scene {scene_num}: File not found")
+            continue
 
-    if not scene_paths:
+        is_image = asset_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']
+        ready_clip = work_dir / f"scene_{scene_num}_ready.mp4"
+
+        if is_image:
+            print(f"[Assembly] Scene {scene_num}: Ken Burns + color grade ({duration}s)")
+            ok = _prepare_image_clip(asset_path, ready_clip, duration)
+        else:
+            src_dur = _probe_duration(asset_path)
+            print(f"[Assembly] Scene {scene_num}: Video {src_dur:.1f}s -> {duration}s + color grade")
+            ok = _prepare_video_clip(asset_path, ready_clip, duration)
+
+        if ok and ready_clip.exists():
+            scene_clips.append(ready_clip)
+        else:
+            print(f"[Assembly] Scene {scene_num}: Preparation failed")
+
+    if not scene_clips:
         raise RuntimeError("[Assembly] No scene clips prepared")
 
-    # Step 2: Concatenate all scenes using FFmpeg concat demuxer
-    concat_list = work_dir / "concat.txt"
-    with open(concat_list, "w") as f:
-        for p in scene_paths:
-            f.write(f"file '{p.resolve().as_posix()}'\n")
+    # Step 2: Concatenate with crossfade transitions
+    print(f"[Assembly] Adding crossfade transitions between {len(scene_clips)} scenes...")
+    crossfaded = work_dir / "crossfaded.mp4"
+    _add_crossfade(scene_clips, crossfaded)
 
-    concat_output = work_dir / "concat.mp4"
-    print(f"[Assembly] Concatenating {len(scene_paths)} scenes...")
-    concat_cmd = [
-        _get_ffmpeg(), "-y",
-        "-f", "concat", "-safe", "0",
-        "-i", str(concat_list),
-        "-c:v", "libx264", "-preset", "fast",
-        "-pix_fmt", "yuv420p",
-        str(concat_output),
-    ]
-    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        print(f"[Assembly] Concat failed: {result.stderr[:300]}")
-        raise RuntimeError("Scene concatenation failed")
-
-    # Step 3: Overlay voiceover audio
-    print(f"[Assembly] Adding voiceover audio...")
-    audio_output = work_dir / "with_audio.mp4"
-    audio_cmd = [
-        _get_ffmpeg(), "-y",
-        "-i", str(concat_output),
+    # Step 3: Add voiceover audio
+    print(f"[Assembly] Overlaying voiceover audio...")
+    with_audio = work_dir / "with_audio.mp4"
+    result = subprocess.run([
+        ffmpeg, "-y",
+        "-i", str(crossfaded),
         "-i", str(voiceover_path),
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "192k",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
         "-map", "0:v:0", "-map", "1:a:0",
         "-shortest",
-        str(audio_output),
-    ]
-    result = subprocess.run(audio_cmd, capture_output=True, text=True, timeout=120)
+        str(with_audio),
+    ], capture_output=True, text=True, timeout=120)
+
     if result.returncode != 0:
-        print(f"[Assembly] Audio overlay failed: {result.stderr[:300]}")
-        raise RuntimeError("Audio overlay failed")
+        raise RuntimeError(f"Audio overlay failed: {result.stderr[:200]}")
 
-    # Step 4: Burn captions
+    # Step 4: Burn captions — small, bottom, ALL CAPS
+    print(f"[Assembly] Burning captions...")
+    with_captions = work_dir / "with_captions.mp4"
     if captions_path.exists():
-        print(f"[Assembly] Burning captions...")
         srt_posix = captions_path.as_posix().replace("'", "\\'")
-
-        fontsize = CONFIG.get("captions", {}).get("font_size", 52)
-        text_color = CONFIG.get("captions", {}).get("color", "white")
-        outline_color = CONFIG.get("captions", {}).get("outline_color", "black")
-        outline_width = CONFIG.get("captions", {}).get("outline_width", 3)
-
+        # Small font, white text with black outline, bottom center
+        # MarginV=120 pushes it above the very bottom (avoids YouTube UI overlap)
         vf = (
             f"subtitles='{srt_posix}':"
-            f"force_style='FontSize={fontsize},PrimaryColour=&H00FFFFFF,"
-            f"OutlineColour=&H00000000,BorderStyle=3,Outline={outline_width},"
-            f"Alignment=2,MarginV=80'"
+            f"force_style='FontSize=24,PrimaryColour=&H00FFFFFF,"
+            f"OutlineColour=&H00000000,BorderStyle=3,Outline=2,"
+            f"Bold=1,Alignment=2,MarginV=120'"
         )
-
-        caption_cmd = [
-            _get_ffmpeg(), "-y",
-            "-i", str(audio_output),
+        result = subprocess.run([
+            ffmpeg, "-y",
+            "-i", str(with_audio),
             "-vf", vf,
             "-c:v", "libx264", "-preset", "fast",
             "-c:a", "copy",
-            str(output_path),
-        ]
-        result = subprocess.run(caption_cmd, capture_output=True, text=True, timeout=300)
+            str(with_captions),
+        ], capture_output=True, text=True, timeout=300)
+
         if result.returncode != 0:
-            print(f"[Assembly] Caption burn failed: {result.stderr[:300]}")
-            print(f"[Assembly] Using video without captions")
-            import shutil
-            shutil.copy2(audio_output, output_path)
+            print(f"[Assembly] Caption burn failed, using video without captions")
+            with_captions = with_audio
     else:
-        print(f"[Assembly] No captions, using audio-only video")
-        import shutil
-        shutil.copy2(audio_output, output_path)
+        with_captions = with_audio
+
+    # Step 5: Add hook text overlay on first 3 seconds
+    hook_text = script.get("hook", "")
+    if hook_text:
+        print(f"[Assembly] Adding hook overlay: '{hook_text}'")
+        with_hook = work_dir / "with_hook.mp4"
+        if _add_hook_overlay(with_captions, with_hook, hook_text):
+            final_source = with_hook
+        else:
+            final_source = with_captions
+    else:
+        final_source = with_captions
+
+    # Step 6: Copy to final output
+    import shutil
+    shutil.copy2(final_source, output_path)
 
     # Cleanup work directory
     for f in work_dir.iterdir():
@@ -317,20 +347,21 @@ def assemble_video(
     work_dir.rmdir()
 
     file_size = output_path.stat().st_size / (1024 * 1024)
-    print(f"\n[Assembly] DONE: {output_path} ({file_size:.1f} MB)")
+    dur = _probe_duration(output_path)
+    print(f"\n[Assembly] DONE: {output_path} ({file_size:.1f} MB, {dur:.1f}s)")
 
     return output_path
 
 
 if __name__ == "__main__":
     test_dir = None
-    for d in [Path("output/test_gemma"), Path("output/test_script")]:
+    for d in [Path("output/test_quality"), Path("output/test_gemma")]:
         if (d / "script.json").exists():
             test_dir = d
             break
 
     if not test_dir:
-        print("No test script found. Run script_generator.py first.")
+        print("No test script found.")
         raise SystemExit(1)
 
     script = json.loads((test_dir / "script.json").read_text())

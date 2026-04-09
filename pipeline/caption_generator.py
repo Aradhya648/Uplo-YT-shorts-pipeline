@@ -1,7 +1,8 @@
 """
-Caption Generator — Transcribes voiceover audio to timed SRT captions.
+Caption Generator — Transcribes voiceover to timed SRT captions.
 
-Uses faster-whisper for word-level timestamps, outputs standard SRT format.
+Uses faster-whisper for word-level timestamps.
+Outputs short 2-3 word segments for punchy YouTube Shorts style captions.
 """
 
 import json
@@ -17,9 +18,11 @@ def format_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def generate_captions(audio_path: Path, output_dir: Path, max_words_per_segment: int = 6) -> Path:
-    """Generate SRT captions from audio using faster-whisper."""
-    # Import here to avoid slow load at module level
+def generate_captions(audio_path: Path, output_dir: Path, max_words_per_segment: int = 3) -> Path:
+    """Generate SRT captions from audio using faster-whisper.
+
+    Uses 3-word segments for punchy, YouTube Shorts-style captions.
+    """
     from faster_whisper import WhisperModel
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -56,7 +59,7 @@ def generate_captions(audio_path: Path, output_dir: Path, max_words_per_segment:
 
     print(f"[Captions] Transcribed {len(all_words)} words")
 
-    # Group words into caption segments (max N words per line)
+    # Group into 2-3 word segments for punchy captions
     srt_entries = []
     idx = 1
     i = 0
@@ -64,7 +67,7 @@ def generate_captions(audio_path: Path, output_dir: Path, max_words_per_segment:
         chunk = all_words[i:i + max_words_per_segment]
         start_time = chunk[0]["start"]
         end_time = chunk[-1]["end"]
-        text = " ".join(w["word"] for w in chunk)
+        text = " ".join(w["word"] for w in chunk).upper()  # ALL CAPS for impact
 
         srt_entries.append({
             "index": idx,
@@ -84,7 +87,7 @@ def generate_captions(audio_path: Path, output_dir: Path, max_words_per_segment:
         srt_lines.append("")
 
     srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
-    print(f"[Captions] Saved: {srt_path} ({len(srt_entries)} segments)")
+    print(f"[Captions] Saved: {srt_path} ({len(srt_entries)} segments, {max_words_per_segment} words/seg)")
 
     # Also save word-level JSON for potential use in video assembly
     words_json_path = output_dir / "words.json"
@@ -94,17 +97,16 @@ def generate_captions(audio_path: Path, output_dir: Path, max_words_per_segment:
 
 
 if __name__ == "__main__":
-    # Standalone test: generate captions from test voiceover
-    test_audio = Path("output/test_voiceover/voiceover.wav")
+    test_audio = Path("output/test_quality/voiceover.wav")
     if not test_audio.exists():
         print("No test voiceover found. Run voiceover.py first.")
         raise SystemExit(1)
 
-    output_dir = Path("output/test_voiceover")
+    output_dir = Path("output/test_quality")
     srt_path = generate_captions(test_audio, output_dir)
 
     print(f"\nCaptions saved to: {srt_path}")
-    print("\nFirst 10 lines:")
+    print("\nFirst 15 lines:")
     lines = srt_path.read_text().splitlines()
-    for line in lines[:10]:
+    for line in lines[:15]:
         print(f"  {line}")

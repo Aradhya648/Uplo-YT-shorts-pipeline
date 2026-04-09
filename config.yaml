@@ -17,11 +17,14 @@ assets:
 
 captions:
   font: "Arial Bold"
-  font_size: 52
+  font_size: 24
+  words_per_segment: 3
+  all_caps: true
   color: "white"
   outline_color: "black"
-  outline_width: 3
+  outline_width: 2
   position: "bottom_center"
+  margin_bottom: 120
 
 upload:
   privacy: "public"
