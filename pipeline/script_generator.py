@@ -27,14 +27,11 @@ GEMINI_MODELS = [
 ]
 
 OPENROUTER_MODELS = [
-    "google/gemma-4-31b-it:free",
+    "qwen/qwen3-coder:free",
     "minimax/minimax-m2.5:free",
-    "google/gemma-4-26b-a4b-it:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "openai/gpt-oss-120b:free",
-    "google/gemma-3-27b-it:free",
-    "qwen/qwen3-coder:free",
 ]
 
 
@@ -210,7 +207,7 @@ def generate_script(topic: dict, output_dir: Path, max_retries: int = 2) -> dict
             # Save script
             output_dir.mkdir(parents=True, exist_ok=True)
             script_path = output_dir / "script.json"
-            script_path.write_text(json.dumps(script, indent=2, ensure_ascii=False))
+            script_path.write_text(json.dumps(script, indent=2, ensure_ascii=False), encoding="utf-8")
             print(f"[ScriptGen] Script saved to {script_path}")
 
             # Calculate word count for duration estimate

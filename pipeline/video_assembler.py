@@ -11,7 +11,9 @@ Features:
 - Voiceover audio overlay
 """
 
+import glob as _glob
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -31,30 +33,34 @@ TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
 TARGET_FPS = 30
 
-FFMPEG_DIR = None
-for p in [
-    Path("C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin"),
-]:
-    if p.exists():
-        FFMPEG_DIR = p
-        break
+def _find_ffmpeg() -> str:
+    """Locate ffmpeg.exe: CapCut bundle (latest version) then PATH."""
+    capcut = sorted(
+        _glob.glob(str(Path.home() / "AppData/Local/CapCut/Apps/*/ffmpeg.exe")),
+        reverse=True,
+    )
+    if capcut:
+        return capcut[0]
+    return "ffmpeg"
+
+
+_FFMPEG_EXE = _find_ffmpeg()
 
 
 def _get_ffmpeg() -> str:
-    return str(FFMPEG_DIR / "ffmpeg.exe") if FFMPEG_DIR else "ffmpeg"
-
-
-def _get_ffprobe() -> str:
-    return str(FFMPEG_DIR / "ffprobe.exe") if FFMPEG_DIR else "ffprobe"
+    return _FFMPEG_EXE
 
 
 def _probe_duration(path: Path) -> float:
     try:
         result = subprocess.run(
-            [_get_ffprobe(), "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],
+            [_get_ffmpeg(), "-i", str(path)],
             capture_output=True, text=True, timeout=15,
         )
-        return float(json.loads(result.stdout)["format"]["duration"])
+        m = re.search(r"Duration:\s*(\d+):(\d+):([\d.]+)", result.stderr)
+        if m:
+            return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+        return 0
     except Exception:
         return 0
 
@@ -174,7 +180,7 @@ def _add_crossfade(clips: list[Path], output_path: Path, fade_duration: float = 
         print(f"[Assembly] Crossfade failed, falling back to hard cuts: {result.stderr[:200]}")
         # Fallback: simple concat without crossfade
         concat_list = output_path.parent / "concat_fallback.txt"
-        with open(concat_list, "w") as f:
+        with open(concat_list, "w", encoding="utf-8") as f:
             for c in clips:
                 f.write(f"file '{c.resolve().as_posix()}'\n")
         result = subprocess.run([

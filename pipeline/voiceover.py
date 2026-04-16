@@ -6,8 +6,10 @@ Uses en-US-GuyNeural with slightly slower rate for dramatic effect.
 """
 
 import asyncio
+import glob as _glob
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -21,17 +23,22 @@ VOICE = os.getenv("TTS_VOICE", "en-US-GuyNeural")
 RATE = os.getenv("TTS_RATE", "-5%")   # slightly slower = more dramatic
 PITCH = os.getenv("TTS_PITCH", "-2Hz")  # slightly deeper
 
-FFMPEG_DIR = None
-for p in [
-    Path("C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1-full_build/bin"),
-]:
-    if p.exists():
-        FFMPEG_DIR = p
-        break
+def _find_ffmpeg() -> str:
+    """Locate ffmpeg.exe: CapCut bundle (latest version) then PATH."""
+    capcut = sorted(
+        _glob.glob(str(Path.home() / "AppData/Local/CapCut/Apps/*/ffmpeg.exe")),
+        reverse=True,
+    )
+    if capcut:
+        return capcut[0]
+    return "ffmpeg"
+
+
+_FFMPEG_EXE = _find_ffmpeg()
 
 
 def _get_ffmpeg() -> str:
-    return str(FFMPEG_DIR / "ffmpeg.exe") if FFMPEG_DIR else "ffmpeg"
+    return _FFMPEG_EXE
 
 
 async def _generate_scene_audio(text: str, output_path: Path) -> Path:
@@ -80,7 +87,7 @@ def generate_voiceover(script: dict, output_dir: Path) -> Path:
 
     # Build concat list: scene1 + silence + scene2 + silence + ...
     concat_list = work_dir / "concat.txt"
-    with open(concat_list, "w") as f:
+    with open(concat_list, "w", encoding="utf-8") as f:
         for i, sf in enumerate(scene_files):
             f.write(f"file '{sf.resolve().as_posix()}'\n")
             if i < len(scene_files) - 1:

@@ -257,14 +257,11 @@ IMPORTANT: You MUST respond with ONLY a JSON object. No analysis, no thinking, n
 }}"""
 
     openrouter_models = [
-        "google/gemma-4-31b-it:free",
+        "qwen/qwen3-coder:free",
         "minimax/minimax-m2.5:free",
-        "google/gemma-4-26b-a4b-it:free",
         "meta-llama/llama-3.3-70b-instruct:free",
         "nousresearch/hermes-3-llama-3.1-405b:free",
         "openai/gpt-oss-120b:free",
-        "google/gemma-3-27b-it:free",
-        "qwen/qwen3-coder:free",
     ]
 
     # Try Gemini first (higher free-tier limits), then OpenRouter

@@ -256,7 +256,7 @@ def fetch_assets(script: dict, output_dir: Path) -> list[dict]:
 
     # Save asset manifest
     manifest_path = output_dir / "assets.json"
-    manifest_path.write_text(json.dumps(assets, indent=2))
+    manifest_path.write_text(json.dumps(assets, indent=2), encoding="utf-8")
     print(f"\n[Assets] Manifest saved: {manifest_path}")
 
     fetched = sum(1 for a in assets if a["path"])

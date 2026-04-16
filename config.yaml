@@ -6,7 +6,7 @@ pipeline:
   scenes_per_video: 4             # number of scenes
 
 script:
-  model: "google/gemma-4-31b-it:free"
+  model: "qwen/qwen3-coder:free"
   max_tokens: 800
   tone: "engaging, curious, slightly dramatic"
 
