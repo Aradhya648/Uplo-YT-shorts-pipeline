@@ -11,9 +11,9 @@ Features:
 - Voiceover audio overlay
 """
 
-import glob as _glob
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -34,21 +34,45 @@ TARGET_HEIGHT = 1920
 TARGET_FPS = 30
 
 def _find_ffmpeg() -> str:
-    """Locate ffmpeg.exe: CapCut bundle (latest version) then PATH."""
-    capcut = sorted(
-        _glob.glob(str(Path.home() / "AppData/Local/CapCut/Apps/*/ffmpeg.exe")),
-        reverse=True,
+    """Locate ffmpeg: PATH (shutil.which) → WinGet install → bare 'ffmpeg'."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    winget = Path(
+        "C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages"
+        "/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+        "/ffmpeg-8.1-full_build/bin/ffmpeg.exe"
     )
-    if capcut:
-        return capcut[0]
+    if winget.exists():
+        return str(winget)
     return "ffmpeg"
 
 
+def _find_ffprobe() -> str:
+    """Locate ffprobe: PATH (shutil.which) → WinGet install → bare 'ffprobe'."""
+    found = shutil.which("ffprobe")
+    if found:
+        return found
+    winget = Path(
+        "C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages"
+        "/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+        "/ffmpeg-8.1-full_build/bin/ffprobe.exe"
+    )
+    if winget.exists():
+        return str(winget)
+    return "ffprobe"
+
+
 _FFMPEG_EXE = _find_ffmpeg()
+_FFPROBE_EXE = _find_ffprobe()
 
 
 def _get_ffmpeg() -> str:
     return _FFMPEG_EXE
+
+
+def _get_ffprobe() -> str:
+    return _FFPROBE_EXE
 
 
 def _probe_duration(path: Path) -> float:
@@ -138,7 +162,6 @@ def _add_crossfade(clips: list[Path], output_path: Path, fade_duration: float = 
     ffmpeg = _get_ffmpeg()
 
     if len(clips) == 1:
-        import shutil
         shutil.copy2(clips[0], output_path)
         return True
 
@@ -194,6 +217,23 @@ def _add_crossfade(clips: list[Path], output_path: Path, fade_duration: float = 
     return True
 
 
+def _find_font() -> str:
+    """Find a bold font for FFmpeg drawtext, with Windows drive-letter escaping."""
+    candidates = [
+        Path("C:/Windows/Fonts/arialbd.ttf"),                                    # Windows
+        Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),               # macOS
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),            # Linux
+    ]
+    for p in candidates:
+        if p.exists():
+            s = p.as_posix()
+            # FFmpeg drawtext requires escaping the colon in Windows drive letters
+            if len(s) >= 2 and s[1] == ":":
+                s = s[0] + "\\:" + s[2:]
+            return s
+    return ""
+
+
 def _add_hook_overlay(input_path: Path, output_path: Path, hook_text: str) -> bool:
     """Burn hook text on the first 3 seconds as a dramatic overlay."""
     ffmpeg = _get_ffmpeg()
@@ -201,12 +241,13 @@ def _add_hook_overlay(input_path: Path, output_path: Path, hook_text: str) -> bo
     # Escape special characters for FFmpeg drawtext
     safe_text = hook_text.upper().replace("'", "\\'").replace(":", "\\:").replace(",", "\\,")
 
-    font_path = "C\\:/Windows/Fonts/arialbd.ttf"
+    font_path = _find_font()
+    fontfile_clause = f"fontfile='{font_path}':" if font_path else ""
 
     # Hook text: large, white, center screen, fades in and out
     drawtext = (
         f"drawtext=text='{safe_text}':"
-        f"fontfile='{font_path}':"
+        f"{fontfile_clause}"
         f"fontsize=56:fontcolor=white:borderw=4:bordercolor=black:"
         f"x=(w-text_w)/2:y=(h-text_h)/2-100:"
         f"enable='between(t\\,0.3\\,3)':"
@@ -344,7 +385,6 @@ def assemble_video(
         final_source = with_captions
 
     # Step 6: Copy to final output
-    import shutil
     shutil.copy2(final_source, output_path)
 
     # Cleanup work directory

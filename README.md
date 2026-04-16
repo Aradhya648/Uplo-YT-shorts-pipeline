@@ -4,11 +4,41 @@ Fully automated YouTube Shorts pipeline for historical facts and micro-history c
 
 ## Setup
 
-1. Install Python dependencies: `pip install -r requirements.txt`
-2. Install FFmpeg: `winget install Gyan.FFmpeg`
-3. Download Piper TTS model to `assets/piper-models/`
-4. Copy `.env.example` to `.env` and fill in API keys
-5. Run: `python main.py`
+**Requirements:** Python 3.10+
+
+1. Create and activate a virtual environment:
+   ```bash
+   python -m venv .venv
+   # Windows
+   .venv\Scripts\activate
+   # macOS / Linux
+   source .venv/bin/activate
+   ```
+
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. Install FFmpeg (if not already on PATH):
+   ```bash
+   # Windows
+   winget install Gyan.FFmpeg
+   # macOS
+   brew install ffmpeg
+   # Linux
+   sudo apt install ffmpeg
+   ```
+
+4. Copy `.env.example` to `.env` and fill in API keys:
+   ```bash
+   cp .env.example .env
+   ```
+
+5. Always use `--dry-run` during testing (skips upload, Sheets, and Telegram):
+   ```bash
+   python main.py --dry-run
+   ```
 
 ## Usage
 

@@ -6,10 +6,10 @@ Uses en-US-GuyNeural with slightly slower rate for dramatic effect.
 """
 
 import asyncio
-import glob as _glob
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -24,13 +24,17 @@ RATE = os.getenv("TTS_RATE", "-5%")   # slightly slower = more dramatic
 PITCH = os.getenv("TTS_PITCH", "-2Hz")  # slightly deeper
 
 def _find_ffmpeg() -> str:
-    """Locate ffmpeg.exe: CapCut bundle (latest version) then PATH."""
-    capcut = sorted(
-        _glob.glob(str(Path.home() / "AppData/Local/CapCut/Apps/*/ffmpeg.exe")),
-        reverse=True,
+    """Locate ffmpeg: PATH (shutil.which) → WinGet install → bare 'ffmpeg'."""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    winget = Path(
+        "C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages"
+        "/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
+        "/ffmpeg-8.1-full_build/bin/ffmpeg.exe"
     )
-    if capcut:
-        return capcut[0]
+    if winget.exists():
+        return str(winget)
     return "ffmpeg"
 
 
