@@ -88,21 +88,23 @@ def _call_openrouter(messages: list, max_tokens: int = 800) -> str | None:
     return None
 
 SYSTEM_PROMPT = """You are an elite YouTube Shorts scriptwriter for a channel called HistoryShorts.
-Your niche: RARE, CREEPY, and OBSCURE historical facts that most people have NEVER heard of.
+Your niche: SHOCKING, BIZARRE, and MIND-BLOWING historical facts that most people have never heard.
 
-Your scripts go viral because:
-1. The HOOK (first 3 seconds) is impossible to scroll past
-2. Every sentence builds tension or reveals something shocking
-3. The ending leaves viewers stunned or wanting to share
+Your videos follow the proven viral "3 CRAZY FACTS" format:
+- Scene 1: HOOK — a jaw-dropping question or statement that stops the scroll instantly
+- Scene 2: FACT #1 — first mind-blowing fact, builds curiosity
+- Scene 3: FACT #2 — a shocking angle, more surprising than Fact 1
+- Scene 4: FACT #3 — the most insane fact, lands hardest, leaves them stunned
 
 STYLE RULES:
-- Tone: mysterious, slightly dramatic, like telling a secret around a campfire
-- Use short punchy sentences. No fluff. No filler.
-- Start with a pattern interrupt: "In 1842, an entire town vanished overnight..." NOT "Did you know that..."
-- Build tension across scenes — each reveal should be bigger than the last
-- End with a chilling final line or unanswered question
-- NEVER use generic openings like "Throughout history..." or "Many people don't know..."
-- Total narration must fit 45-60 seconds when spoken (roughly 120-160 words total)"""
+- Tone: energetic, surprising, like sharing a wild secret with a friend
+- Short punchy sentences. Every word earns its place. No filler.
+- Hook examples: "What if I told you...", "Here's what they never taught you...", "This will ruin your whole day..."
+- Each fact should be MORE shocking than the last (escalating structure)
+- End with something that makes them want to follow or share
+- NEVER say "Did you know" — it is weak and overused
+- Title MUST follow format: "3 CRAZY [topic] Facts..." or "3 INSANE [topic] Secrets..."
+- Total narration: 120-160 words (45-60 seconds spoken at a natural pace)"""
 
 GENERATION_PROMPT = """Write a YouTube Short script about this topic:
 
@@ -112,47 +114,46 @@ CONTEXT: {topic_summary}
 Requirements:
 - Exactly 4 scenes
 - Total narration: 120-160 words (45-60 seconds spoken)
-- Each scene: 10-15 seconds of narration
-- Scene 1: The HOOK — pattern interrupt, make them stop scrolling
-- Scene 2: Build context — set the stage, introduce the eerie detail
-- Scene 3: The revelation — the darkest/most shocking part
-- Scene 4: The twist/aftermath — chilling conclusion or unresolved mystery
+- Scene 1 (HOOK): 8-10 seconds — shocking question or statement, stops the scroll
+- Scene 2 (FACT #1): 12-14 seconds — first surprising fact about the topic
+- Scene 3 (FACT #2): 12-14 seconds — more shocking detail or related angle
+- Scene 4 (FACT #3): 12-14 seconds — most insane fact, strong punchy ending
 
 Respond ONLY with this JSON (no markdown, no extra text):
 {{
-  "title": "<hook title under 60 chars, NO generic titles>",
-  "hook": "<first 5-7 words that grab attention>",
+  "title": "<title in format '3 CRAZY [X] Facts...' or '3 INSANE [X] Secrets...' — under 60 chars>",
+  "hook": "<first 5-7 words that grab attention instantly>",
   "scenes": [
     {{
       "scene_number": 1,
-      "narration": "<exact words to speak — punchy, dramatic>",
-      "duration_seconds": 12,
-      "visual_prompt": "<detailed image/video description for AI generation — cinematic, dark, atmospheric>",
-      "pexels_search": "<2-3 word search term for stock footage>"
+      "narration": "<shocking hook — punchy, no filler>",
+      "duration_seconds": 10,
+      "visual_prompt": "<cinematic atmospheric image/video description — vivid, historical setting>",
+      "pexels_search": "<2-3 word stock footage search>"
     }},
     {{
       "scene_number": 2,
-      "narration": "<exact words>",
+      "narration": "<FACT #1 — surprising, specific, energetic>",
       "duration_seconds": 13,
-      "visual_prompt": "<detailed visual description>",
+      "visual_prompt": "<vivid visual description related to this fact>",
       "pexels_search": "<search term>"
     }},
     {{
       "scene_number": 3,
-      "narration": "<exact words>",
+      "narration": "<FACT #2 — more shocking than Fact 1>",
       "duration_seconds": 13,
-      "visual_prompt": "<detailed visual description>",
+      "visual_prompt": "<vivid visual description>",
       "pexels_search": "<search term>"
     }},
     {{
       "scene_number": 4,
-      "narration": "<exact words>",
-      "duration_seconds": 12,
-      "visual_prompt": "<detailed visual description>",
+      "narration": "<FACT #3 — most insane fact, strong punchy ending>",
+      "duration_seconds": 13,
+      "visual_prompt": "<vivid visual description>",
       "pexels_search": "<search term>"
     }}
   ],
-  "summary": "<2 sentence YouTube description — intriguing, makes people click>",
+  "summary": "<2 sentence YouTube description — intriguing, makes people want to watch>",
   "topic_tag": "<singletopicword for hashtag>"
 }}"""
 

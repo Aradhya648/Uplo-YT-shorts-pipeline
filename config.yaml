@@ -16,15 +16,15 @@ assets:
   google_ai_video_scenes: [0, 3]  # use AI video for first and last scene only
 
 captions:
-  font: "Arial Bold"
-  font_size: 24
+  font: "Impact"
+  font_size: 52
   words_per_segment: 3
   all_caps: true
   color: "white"
   outline_color: "black"
-  outline_width: 2
-  position: "bottom_center"
-  margin_bottom: 120
+  outline_width: 4
+  position: "bottom"
+  margin_bottom: 160
 
 upload:
   privacy: "public"

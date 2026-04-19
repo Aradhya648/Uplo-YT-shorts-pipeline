@@ -1,17 +1,22 @@
 """
-Video Assembler — World-class YouTube Shorts assembly.
+Video Assembler — Viral YouTube Shorts style assembly.
 
 Features:
 - Crop/resize all assets to 1080x1920
 - Ken Burns zoom for static images
 - Crossfade transitions between scenes
-- Dark/moody color grading for creepy content
-- Hook text overlay on first 3 seconds
-- Punchy 3-word ALL CAPS captions (small, bottom-center)
+- Warm cinematic color grading
+- Large centered bold captions (Impact font, 76px, center-screen)
+- FACT #1 / FACT #2 / FACT #3 section labels at each scene
+- Title card overlay on first 2.5 seconds
+- "FOLLOW FOR MORE" CTA in last 2.5 seconds
+- Background music mixing (drop bgm.mp3 in assets/bgm/ to enable)
 - Voiceover audio overlay
 """
 
+import glob as _glob
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -33,33 +38,56 @@ TARGET_WIDTH = 1080
 TARGET_HEIGHT = 1920
 TARGET_FPS = 30
 
+BGM_PATH = Path(__file__).parent.parent / "assets" / "bgm" / "bgm.mp3"
+
+# Warm cinematic color grade — vivid, natural brightness, warm tones
+_COLOR_GRADE = (
+    "eq=brightness=-0.02:contrast=1.15:saturation=1.1,"
+    "curves=r='0/0 0.5/0.55 1/1':g='0/0 0.5/0.5 1/1':b='0/0 0.5/0.44 1/0.93'"
+)
+
+
 def _find_ffmpeg() -> str:
-    """Locate ffmpeg: PATH (shutil.which) → WinGet install → bare 'ffmpeg'."""
     found = shutil.which("ffmpeg")
     if found:
         return found
-    winget = Path(
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    if local_appdata:
+        pattern = str(
+            Path(local_appdata) / "Microsoft/WinGet/Packages/Gyan.FFmpeg*/ffmpeg-*/bin/ffmpeg.exe"
+        )
+        matches = sorted(_glob.glob(pattern), reverse=True)
+        if matches:
+            return matches[0]
+    aradhya = Path(
         "C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages"
         "/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
         "/ffmpeg-8.1-full_build/bin/ffmpeg.exe"
     )
-    if winget.exists():
-        return str(winget)
+    if aradhya.exists():
+        return str(aradhya)
     return "ffmpeg"
 
 
 def _find_ffprobe() -> str:
-    """Locate ffprobe: PATH (shutil.which) → WinGet install → bare 'ffprobe'."""
     found = shutil.which("ffprobe")
     if found:
         return found
-    winget = Path(
+    local_appdata = os.environ.get("LOCALAPPDATA", "")
+    if local_appdata:
+        pattern = str(
+            Path(local_appdata) / "Microsoft/WinGet/Packages/Gyan.FFmpeg*/ffmpeg-*/bin/ffprobe.exe"
+        )
+        matches = sorted(_glob.glob(pattern), reverse=True)
+        if matches:
+            return matches[0]
+    aradhya = Path(
         "C:/Users/91979/AppData/Local/Microsoft/WinGet/Packages"
         "/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe"
         "/ffmpeg-8.1-full_build/bin/ffprobe.exe"
     )
-    if winget.exists():
-        return str(winget)
+    if aradhya.exists():
+        return str(aradhya)
     return "ffprobe"
 
 
@@ -90,24 +118,17 @@ def _probe_duration(path: Path) -> float:
 
 
 def _prepare_video_clip(input_path: Path, output_path: Path, duration: float) -> bool:
-    """Crop, resize, loop if needed, apply color grading, trim to duration."""
+    """Crop, resize, loop if needed, apply warm color grade, trim to duration."""
     ffmpeg = _get_ffmpeg()
     clip_dur = _probe_duration(input_path)
-
-    # Color grading filter: darken, increase contrast, slight desaturation for moody look
-    color_grade = (
-        "eq=brightness=-0.06:contrast=1.2:saturation=0.85,"
-        "curves=m='0/0 0.25/0.15 0.5/0.45 0.75/0.7 1/0.9'"
-    )
 
     vf = (
         f"scale=1080:1920:force_original_aspect_ratio=increase,"
         f"crop=1080:1920,"
         f"setsar=1,"
-        f"{color_grade}"
+        f"{_COLOR_GRADE}"
     )
 
-    # If clip is shorter than needed, use stream_loop
     loop_args = []
     if clip_dur > 0 and clip_dur < duration - 0.5:
         loop_args = ["-stream_loop", "-1"]
@@ -119,7 +140,7 @@ def _prepare_video_clip(input_path: Path, output_path: Path, duration: float) ->
         "-t", str(duration),
         "-vf", vf,
         "-r", str(TARGET_FPS),
-        "-c:v", "libx264", "-preset", "fast",
+        "-c:v", "libx264", "-preset", "fast", "-threads", "1",
         "-an", "-pix_fmt", "yuv420p",
         str(output_path),
     ]
@@ -128,20 +149,15 @@ def _prepare_video_clip(input_path: Path, output_path: Path, duration: float) ->
 
 
 def _prepare_image_clip(input_path: Path, output_path: Path, duration: float) -> bool:
-    """Ken Burns zoom + color grading on a static image."""
+    """Ken Burns zoom + warm color grade on a static image."""
     ffmpeg = _get_ffmpeg()
     total_frames = int(duration * TARGET_FPS)
-
-    color_grade = (
-        "eq=brightness=-0.06:contrast=1.2:saturation=0.85,"
-        "curves=m='0/0 0.25/0.15 0.5/0.45 0.75/0.7 1/0.9'"
-    )
 
     vf = (
         f"zoompan=z='1+0.3*on/{total_frames}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
         f":d={total_frames}:s=1080x1920:fps={TARGET_FPS},"
         f"setsar=1,"
-        f"{color_grade}"
+        f"{_COLOR_GRADE}"
     )
 
     cmd = [
@@ -149,7 +165,7 @@ def _prepare_image_clip(input_path: Path, output_path: Path, duration: float) ->
         "-i", str(input_path),
         "-vf", vf,
         "-t", str(duration),
-        "-c:v", "libx264", "-preset", "fast",
+        "-c:v", "libx264", "-preset", "fast", "-threads", "1",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
@@ -165,15 +181,12 @@ def _add_crossfade(clips: list[Path], output_path: Path, fade_duration: float = 
         shutil.copy2(clips[0], output_path)
         return True
 
-    # Build complex filter for xfade between each pair
     inputs = []
     for c in clips:
         inputs.extend(["-i", str(c)])
 
-    # Get durations for offset calculation
     durations = [_probe_duration(c) for c in clips]
 
-    # Build xfade filter chain
     filter_parts = []
     current_label = "[0:v]"
     offset = durations[0] - fade_duration
@@ -194,21 +207,20 @@ def _add_crossfade(clips: list[Path], output_path: Path, fade_duration: float = 
         *inputs,
         "-filter_complex", filter_str,
         "-map", "[vout]",
-        "-c:v", "libx264", "-preset", "fast",
+        "-c:v", "libx264", "-preset", "fast", "-threads", "1",
         "-pix_fmt", "yuv420p",
         str(output_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if result.returncode != 0:
         print(f"[Assembly] Crossfade failed, falling back to hard cuts: {result.stderr[:200]}")
-        # Fallback: simple concat without crossfade
         concat_list = output_path.parent / "concat_fallback.txt"
         with open(concat_list, "w", encoding="utf-8") as f:
             for c in clips:
                 f.write(f"file '{c.resolve().as_posix()}'\n")
         result = subprocess.run([
             ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", str(concat_list), "-c:v", "libx264", "-preset", "fast",
+            "-i", str(concat_list), "-c:v", "libx264", "-preset", "fast", "-threads", "1",
             "-pix_fmt", "yuv420p", str(output_path),
         ], capture_output=True, text=True, timeout=120)
         concat_list.unlink(missing_ok=True)
@@ -218,11 +230,14 @@ def _add_crossfade(clips: list[Path], output_path: Path, fade_duration: float = 
 
 
 def _find_font() -> str:
-    """Find a bold font for FFmpeg drawtext, with Windows drive-letter escaping."""
+    """Find Impact (or bold fallback) for FFmpeg drawtext with Windows escaping."""
     candidates = [
-        Path("C:/Windows/Fonts/arialbd.ttf"),                                    # Windows
-        Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),               # macOS
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),            # Linux
+        Path("C:/Windows/Fonts/impact.ttf"),                               # Impact — viral Shorts default
+        Path("C:/Windows/Fonts/arialbd.ttf"),                              # Arial Bold
+        Path("/System/Library/Fonts/Supplemental/Impact.ttf"),              # macOS
+        Path("/usr/share/fonts/truetype/msttcorefonts/Impact.ttf"),         # Linux
+        Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),          # macOS
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),       # Linux
     ]
     for p in candidates:
         if p.exists():
@@ -234,37 +249,120 @@ def _find_font() -> str:
     return ""
 
 
-def _add_hook_overlay(input_path: Path, output_path: Path, hook_text: str) -> bool:
-    """Burn hook text on the first 3 seconds as a dramatic overlay."""
+def _esc(text: str) -> str:
+    """Escape text for FFmpeg drawtext filter value."""
+    return text.replace("\\", "\\\\").replace("'", "\\'").replace(":", "\\:").replace(",", "\\,")
+
+
+def _add_captions(input_path: Path, output_path: Path, captions_path: Path) -> bool:
+    """Burn ASS captions — all style/position/font defined in the .ass file."""
     ffmpeg = _get_ffmpeg()
-
-    # Escape special characters for FFmpeg drawtext
-    safe_text = hook_text.upper().replace("'", "\\'").replace(":", "\\:").replace(",", "\\,")
-
-    font_path = _find_font()
-    fontfile_clause = f"fontfile='{font_path}':" if font_path else ""
-
-    # Hook text: large, white, center screen, fades in and out
-    drawtext = (
-        f"drawtext=text='{safe_text}':"
-        f"{fontfile_clause}"
-        f"fontsize=56:fontcolor=white:borderw=4:bordercolor=black:"
-        f"x=(w-text_w)/2:y=(h-text_h)/2-100:"
-        f"enable='between(t\\,0.3\\,3)':"
-        f"alpha='if(lt(t\\,0.8)\\,((t-0.3)/0.5)\\,if(gt(t\\,2.5)\\,(3-t)/0.5\\,1))'"
-    )
-
+    ass_posix = captions_path.as_posix().replace("'", "\\'")
+    vf = f"ass='{ass_posix}'"
     cmd = [
         ffmpeg, "-y",
         "-i", str(input_path),
-        "-vf", drawtext,
-        "-c:v", "libx264", "-preset", "fast",
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "fast", "-threads", "1",
         "-c:a", "copy",
         str(output_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
     if result.returncode != 0:
-        print(f"[Assembly] Hook overlay failed: {result.stderr[:200]}")
+        print(f"[Assembly] Caption burn failed: {result.stderr[:200]}")
+        return False
+    return True
+
+
+def _add_all_overlays(
+    input_path: Path,
+    output_path: Path,
+    script: dict,
+    scene_start_times: list[float],
+) -> bool:
+    """Add title card, FACT #N section labels, and FOLLOW FOR MORE CTA."""
+    ffmpeg = _get_ffmpeg()
+    total_dur = _probe_duration(input_path)
+    font_path = _find_font()
+    ff = f"fontfile='{font_path}':" if font_path else ""
+    dt = []  # list of drawtext filter strings
+
+    # ── Title card (first 2.5 seconds) — clean pill box, no raw text ────────
+    raw_title = script.get("title", "").upper()
+    words = raw_title.split()
+    if len(words) >= 4:
+        mid = (len(words) + 1) // 2
+        line1 = _esc(" ".join(words[:mid]))
+        line2 = _esc(" ".join(words[mid:]))
+    else:
+        line1 = _esc(raw_title)
+        line2 = ""
+
+    if line1:
+        y1 = "(h/2)-420" if line2 else "(h/2)-160"
+        dt.append(
+            f"drawtext=text='{line1}':{ff}"
+            f"fontsize=52:fontcolor=white:borderw=3:bordercolor=black:"
+            f"box=1:boxcolor=black@0.65:boxborderw=24:"
+            f"x=(w-text_w)/2:y={y1}:enable='between(t\\,0.1\\,2.5)'"
+        )
+    if line2:
+        dt.append(
+            f"drawtext=text='{line2}':{ff}"
+            f"fontsize=52:fontcolor=white:borderw=3:bordercolor=black:"
+            f"box=1:boxcolor=black@0.65:boxborderw=24:"
+            f"x=(w-text_w)/2:y=(h/2)-340:enable='between(t\\,0.1\\,2.5)'"
+        )
+
+    # ── FOLLOW FOR MORE CTA (last 2.5 seconds) ───────────────────────────────
+    cta_t0 = max(0.0, total_dur - 2.5)
+    dt.append(
+        f"drawtext=text='FOLLOW FOR MORE':{ff}"
+        f"fontsize=46:fontcolor=white:borderw=3:bordercolor=black:"
+        f"box=1:boxcolor=black@0.60:boxborderw=20:"
+        f"x=(w-text_w)/2:y=h-280:enable='between(t\\,{cta_t0:.2f}\\,{total_dur:.2f})'"
+    )
+
+    vf = ",".join(dt)
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(input_path),
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "fast", "-threads", "1",
+        "-c:a", "copy",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if result.returncode != 0:
+        print(f"[Assembly] Overlay pass failed, skipping: {result.stderr[:300]}")
+        shutil.copy2(input_path, output_path)
+        return False
+    return True
+
+
+def _mix_bgm(input_path: Path, bgm_path: Path, output_path: Path) -> bool:
+    """Mix background music at 15% volume with 1s fade-in/out under the voiceover."""
+    ffmpeg = _get_ffmpeg()
+    vo_dur = _probe_duration(input_path)
+    fade_out_start = max(0.0, vo_dur - 1.5)
+    filter_complex = (
+        f"[1:a]volume=0.15,afade=t=in:st=0:d=1,afade=t=out:st={fade_out_start:.2f}:d=1.5[bgm];"
+        "[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+    )
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(input_path),
+        "-stream_loop", "-1", "-i", str(bgm_path),
+        "-filter_complex", filter_complex,
+        "-map", "0:v:0",
+        "-map", "[aout]",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "192k",
+        str(output_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    if result.returncode != 0:
+        print(f"[Assembly] BGM mix failed: {result.stderr[:200]}")
         return False
     return True
 
@@ -277,18 +375,20 @@ def assemble_video(
     scenes_dir: Path,
     output_path: Path,
 ) -> Path:
-    """Assemble all components into final video."""
+    """Assemble all components into final viral-style Shorts video."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     work_dir = output_path.parent / "work"
     work_dir.mkdir(parents=True, exist_ok=True)
     ffmpeg = _get_ffmpeg()
 
-    print(f"\n[Assembly] === VIDEO ASSEMBLY (Quality Mode) ===")
+    print(f"\n[Assembly] === VIDEO ASSEMBLY (Viral Shorts Style) ===")
     print(f"[Assembly] Target: {TARGET_WIDTH}x{TARGET_HEIGHT} @ {TARGET_FPS}fps")
 
-    # Step 1: Prepare all scene clips (crop, resize, color grade)
-    scene_clips = []
-    for scene in script["scenes"]:
+    # Step 1: Prepare all scene clips
+    scene_clips: list[Path] = []
+    scene_clip_script_indices: list[int] = []
+
+    for idx, scene in enumerate(script["scenes"]):
         scene_num = scene["scene_number"]
         duration = scene["duration_seconds"]
 
@@ -304,7 +404,7 @@ def assemble_video(
             print(f"[Assembly] Scene {scene_num}: File not found")
             continue
 
-        is_image = asset_path.suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']
+        is_image = asset_path.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp"]
         ready_clip = work_dir / f"scene_{scene_num}_ready.mp4"
 
         if is_image:
@@ -317,19 +417,34 @@ def assemble_video(
 
         if ok and ready_clip.exists():
             scene_clips.append(ready_clip)
+            scene_clip_script_indices.append(idx)
         else:
             print(f"[Assembly] Scene {scene_num}: Preparation failed")
 
     if not scene_clips:
         raise RuntimeError("[Assembly] No scene clips prepared")
 
-    # Step 2: Concatenate with crossfade transitions
-    print(f"[Assembly] Adding crossfade transitions between {len(scene_clips)} scenes...")
+    # Compute per-scene start times in the assembled timeline (crossfade eats 0.5s per cut)
+    FADE_DUR = 0.5
+    clip_durations = [_probe_duration(c) for c in scene_clips]
+    clip_starts: list[float] = []
+    t = 0.0
+    for i, d in enumerate(clip_durations):
+        clip_starts.append(t)
+        t += d - (FADE_DUR if i < len(clip_durations) - 1 else 0.0)
+
+    # Map clip-level start times back to script scene indices
+    full_scene_starts = [0.0] * len(script["scenes"])
+    for clip_i, scene_i in enumerate(scene_clip_script_indices):
+        full_scene_starts[scene_i] = clip_starts[clip_i]
+
+    # Step 2: Crossfade
+    print(f"[Assembly] Crossfading {len(scene_clips)} scenes...")
     crossfaded = work_dir / "crossfaded.mp4"
     _add_crossfade(scene_clips, crossfaded)
 
-    # Step 3: Add voiceover audio
-    print(f"[Assembly] Overlaying voiceover audio...")
+    # Step 3: Voiceover
+    print(f"[Assembly] Overlaying voiceover...")
     with_audio = work_dir / "with_audio.mp4"
     result = subprocess.run([
         ffmpeg, "-y",
@@ -340,54 +455,43 @@ def assemble_video(
         "-shortest",
         str(with_audio),
     ], capture_output=True, text=True, timeout=120)
-
     if result.returncode != 0:
         raise RuntimeError(f"Audio overlay failed: {result.stderr[:200]}")
 
-    # Step 4: Burn captions — small, bottom, ALL CAPS
-    print(f"[Assembly] Burning captions...")
+    # Step 4: Background music (optional)
+    if BGM_PATH.exists():
+        print(f"[Assembly] Mixing BGM: {BGM_PATH.name}")
+        with_bgm = work_dir / "with_bgm.mp4"
+        if _mix_bgm(with_audio, BGM_PATH, with_bgm):
+            audio_source = with_bgm
+        else:
+            print("[Assembly] BGM mix failed — continuing without BGM")
+            audio_source = with_audio
+    else:
+        print(f"[Assembly] No BGM at {BGM_PATH} — drop bgm.mp3 there to enable background music")
+        audio_source = with_audio
+
+    # Step 5: Captions — large, centered, bold (viral Shorts style)
+    print(f"[Assembly] Burning captions (Impact 76px, center screen)...")
     with_captions = work_dir / "with_captions.mp4"
     if captions_path.exists():
-        srt_posix = captions_path.as_posix().replace("'", "\\'")
-        # Small font, white text with black outline, bottom center
-        # MarginV=120 pushes it above the very bottom (avoids YouTube UI overlap)
-        vf = (
-            f"subtitles='{srt_posix}':"
-            f"force_style='FontSize=24,PrimaryColour=&H00FFFFFF,"
-            f"OutlineColour=&H00000000,BorderStyle=3,Outline=2,"
-            f"Bold=1,Alignment=2,MarginV=120'"
-        )
-        result = subprocess.run([
-            ffmpeg, "-y",
-            "-i", str(with_audio),
-            "-vf", vf,
-            "-c:v", "libx264", "-preset", "fast",
-            "-c:a", "copy",
-            str(with_captions),
-        ], capture_output=True, text=True, timeout=300)
-
-        if result.returncode != 0:
-            print(f"[Assembly] Caption burn failed, using video without captions")
-            with_captions = with_audio
-    else:
-        with_captions = with_audio
-
-    # Step 5: Add hook text overlay on first 3 seconds
-    hook_text = script.get("hook", "")
-    if hook_text:
-        print(f"[Assembly] Adding hook overlay: '{hook_text}'")
-        with_hook = work_dir / "with_hook.mp4"
-        if _add_hook_overlay(with_captions, with_hook, hook_text):
-            final_source = with_hook
+        if _add_captions(audio_source, with_captions, captions_path):
+            caption_source = with_captions
         else:
-            final_source = with_captions
+            print("[Assembly] Caption burn failed — continuing without captions")
+            caption_source = audio_source
     else:
-        final_source = with_captions
+        caption_source = audio_source
 
-    # Step 6: Copy to final output
+    # Step 6: Title card + FACT overlays + FOLLOW CTA
+    print(f"[Assembly] Adding title card, FACT labels, and FOLLOW CTA...")
+    with_overlays = work_dir / "with_overlays.mp4"
+    _add_all_overlays(caption_source, with_overlays, script, full_scene_starts)
+    final_source = with_overlays if with_overlays.exists() and with_overlays.stat().st_size > 0 else caption_source
+
+    # Step 7: Copy to final output
     shutil.copy2(final_source, output_path)
 
-    # Cleanup work directory
     for f in work_dir.iterdir():
         f.unlink(missing_ok=True)
     work_dir.rmdir()
@@ -412,7 +516,7 @@ if __name__ == "__main__":
 
     script = json.loads((test_dir / "script.json").read_text())
     voiceover = test_dir / "voiceover.wav"
-    captions = test_dir / "captions.srt"
+    captions = test_dir / "captions.ass"
     scenes_dir = test_dir / "scenes"
     assets_file = test_dir / "assets.json"
 
