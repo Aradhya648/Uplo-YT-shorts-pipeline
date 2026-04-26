@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python main.py --dry-run)",
+      "Bash(where ffmpeg:*)",
+      "Read(//c/Users/Maneesh Awasthi/AppData/Local/Microsoft/WinGet/**)",
+      "Read(//c/ProgramData/chocolatey/bin/**)",
+      "Read(//c/Program Files/**)",
+      "Bash(cmd /c \"where ffmpeg\")",
+      "Bash(cmd /c \"dir /s /b C:\\\\Users\\\\\\\\\"Maneesh Awasthi\"\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WinGet\\\\\\\\Packages\\\\\\\\*ffmpeg* 2>&1\")",
+      "Bash(powershell -Command \"Get-Command ffmpeg -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source; Get-ChildItem 'C:\\\\Users\\\\Maneesh Awasthi\\\\AppData\\\\Local\\\\Microsoft\\\\WinGet\\\\Packages' -Filter '*ffmpeg*' -Recurse -ErrorAction SilentlyContinue | Select-Object FullName -First 5\")",
+      "Bash(powershell -Command \"Get-ChildItem 'C:\\\\Users\\\\Maneesh Awasthi\\\\AppData\\\\Local' -Recurse -Filter 'ffmpeg.exe' -ErrorAction SilentlyContinue | Select-Object -First 5 -ExpandProperty FullName\")",
+      "Read(//c/Users/Maneesh Awasthi/AppData/Local/CapCut/Apps/6.3.0.2438/**)",
+      "Bash(ffmpeg -version)",
+      "WebSearch",
+      "Bash(python -c ' *)"
+    ]
+  }
+}
